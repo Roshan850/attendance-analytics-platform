@@ -20,8 +20,8 @@ app.use(helmet());
 // ── CORS ──────────────────────────────────────────────────────────
 app.use(cors({
   origin: [
-    process.env.CLIENT_URL || "http://localhost:5173",
     "http://localhost:5173",
+    "https://attendance-analytics-platform.vercel.app"
   ],
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
