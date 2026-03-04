@@ -29,7 +29,7 @@
 
 <br/>
 
-![AttendEase Dashboard Preview]([https://placehold.co/900x480/1e1b4b/818cf8?text=AttendEase+Dashboard+Preview&font=montserrat](https://github.com/Roshan850/Screenshot/blob/main/attendease-faculty-dashboard.png))
+![AttendEase Dashboard Preview]([https://placehold.co/900x480/1e1b4b/818cf8?text=AttendEase+Dashboard+Preview&font=montserrat](https://github.com/Roshan850/Screenshot/blob/main/attendease-faculty-dashboard.png)
 
 </div>
 
