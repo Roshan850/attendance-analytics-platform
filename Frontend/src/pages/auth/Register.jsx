@@ -1,59 +1,114 @@
-// ── Date Helpers ──────────────────────────────────────────────────
-export const formatDate = (date, options = {}) => {
-  return new Date(date).toLocaleDateString("en-IN", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    ...options,
-  });
-};
+import { useState } from "react";
+import { Link, useNavigate, Navigate } from "react-router-dom";
+import { useAuth } from "../../context/AuthContext";
+import { authAPI } from "../../utils/api";
+import { getErrorMsg } from "../../utils/helpers";
+import toast from "react-hot-toast";
 
-export const formatDateTime = (date) =>
-  new Date(date).toLocaleString("en-IN", {
-    day: "numeric", month: "short", year: "numeric",
-    hour: "2-digit", minute: "2-digit",
-  });
+export default function Register() {
+  const { user, login } = useAuth();
+  const navigate = useNavigate();
+  const [role, setRole] = useState("student");
+  const [form, setForm] = useState({ name: "", email: "", password: "", confirmPassword: "", rollNo: "", department: "", employeeId: "" });
+  const [loading, setLoading] = useState(false);
 
-export const todayString = () => new Date().toISOString().split("T")[0];
+  if (user) return <Navigate to={`/${user.role}/dashboard`} replace />;
 
-export const getMonthName = (monthNum) => {
-  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-  return months[parseInt(monthNum) - 1] || monthNum;
-};
+  const handleChange = (e) => setForm((p) => ({ ...p, [e.target.name]: e.target.value }));
 
-// ── Attendance Helpers ────────────────────────────────────────────
-export const calcPercentage = (present, total) =>
-  total ? Math.round((present / total) * 100) : 0;
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!form.name || !form.email || !form.password) return toast.error("Fill all required fields");
+    if (form.password.length < 6) return toast.error("Password must be at least 6 characters");
+    if (form.password !== form.confirmPassword) return toast.error("Passwords do not match");
 
-export const getAttendanceColor = (percentage) => {
-  if (percentage >= 75) return "var(--success)";
-  if (percentage >= 50) return "var(--warning)";
-  return "var(--danger)";
-};
+    setLoading(true);
+    try {
+      const payload = { name: form.name, email: form.email, password: form.password, role };
+      if (role === "student" && form.rollNo) payload.rollNo = form.rollNo;
+      if (role === "faculty") {
+        if (form.department) payload.department = form.department;
+        if (form.employeeId) payload.employeeId = form.employeeId;
+      }
 
-export const getAttendanceBadge = (percentage) => {
-  if (percentage >= 75) return { label: "Good", class: "badge-present" };
-  if (percentage >= 50) return { label: "Average", class: "badge-warn" };
-  return { label: "Low ⚠️", class: "badge-absent" };
-};
+      const res = await authAPI.register(payload);
+      login(res.data.user, res.data.token);
+      toast.success(res.data.message);
+      navigate(`/${res.data.user.role}/dashboard`, { replace: true });
+    } catch (err) {
+      toast.error(getErrorMsg(err));
+    } finally {
+      setLoading(false);
+    }
+  };
 
-// ── Error Message Extractor ───────────────────────────────────────
-export const getErrorMsg = (err) => {
-  if (err?.response?.data?.message) return err.response.data.message;
-  if (err?.response?.data?.errors?.[0]?.message) return err.response.data.errors[0].message;
-  if (err?.message) return err.message;
-  return "Something went wrong. Please try again.";
-};
+  const inputClass = "form-control form-control-lg";
 
-// ── String Helpers ────────────────────────────────────────────────
-export const capitalize = (str) =>
-  str ? str.charAt(0).toUpperCase() + str.slice(1) : "";
+  return (
+    <div className="hero-section" style={{ padding: "1rem" }}>
+      <div className="auth-box" style={{ maxWidth: 520 }}>
+        <div className="text-center mb-4">
+          <div style={{ fontSize: "2.5rem" }}>🎓</div>
+          <h4 className="fw-bold mt-2 mb-1" style={{ color: "#4f46e5" }}>Create Account</h4>
+          <p className="text-muted small">Join AttendEase today</p>
+        </div>
 
-export const getInitials = (name) =>
-  name ? name.split(" ").map((n) => n[0]).join("").substring(0, 2).toUpperCase() : "??";
+        {/* Role Selector */}
+        <div className="d-flex rounded-3 overflow-hidden border mb-4" style={{ border: "1px solid #e2e8f0" }}>
+          {["student", "faculty"].map((r) => (
+            <button key={r} type="button" onClick={() => setRole(r)}
+              className="btn flex-fill py-2 rounded-0 fw-semibold"
+              style={{ background: role === r ? "#4f46e5" : "white", color: role === r ? "white" : "#64748b", fontSize: "0.9rem" }}>
+              {r === "student" ? "👨‍🎓 Student" : "👩‍🏫 Faculty"}
+            </button>
+          ))}
+        </div>
 
-// ── Year options ──────────────────────────────────────────────────
-export const getYearOptions = () => {
-  const current = new Date().getFullYear();
-  return [current - 1, current, current + 1];
-};
+        <form onSubmit={handleSubmit} noValidate>
+          <div className="row g-3">
+            <div className="col-12">
+              <input className={inputClass} name="name" placeholder="Full Name *" value={form.name} onChange={handleChange} required />
+            </div>
+            <div className="col-12">
+              <input className={inputClass} type="email" name="email" placeholder="Email Address *" value={form.email} onChange={handleChange} required />
+            </div>
+
+            {role === "student" ? (
+              <div className="col-12">
+                <input className={inputClass} name="rollNo" placeholder="Roll Number (optional)" value={form.rollNo} onChange={handleChange} />
+              </div>
+            ) : (
+              <>
+                <div className="col-md-7">
+                  <input className={inputClass} name="department" placeholder="Department" value={form.department} onChange={handleChange} />
+                </div>
+                <div className="col-md-5">
+                  <input className={inputClass} name="employeeId" placeholder="Employee ID" value={form.employeeId} onChange={handleChange} />
+                </div>
+              </>
+            )}
+
+            <div className="col-md-6">
+              <input className={inputClass} type="password" name="password" placeholder="Password *" value={form.password} onChange={handleChange} required minLength={6} />
+            </div>
+            <div className="col-md-6">
+              <input className={inputClass} type="password" name="confirmPassword" placeholder="Confirm Password *" value={form.confirmPassword} onChange={handleChange} required />
+            </div>
+
+            <div className="col-12">
+              <button type="submit" className="btn btn-lg w-100 fw-bold" disabled={loading}
+                style={{ background: "#4f46e5", color: "white", borderRadius: 8 }}>
+                {loading ? <><span className="spinner-border spinner-border-sm me-2" />Creating...</> : "Create Account →"}
+              </button>
+            </div>
+          </div>
+        </form>
+
+        <div className="text-center mt-3">
+          <p className="text-muted small mb-1">Already have an account? <Link to="/login" style={{ color: "#4f46e5", fontWeight: 600 }}>Login</Link></p>
+          <Link to="/" className="text-muted small">← Back to Home</Link>
+        </div>
+      </div>
+    </div>
+  );
+}

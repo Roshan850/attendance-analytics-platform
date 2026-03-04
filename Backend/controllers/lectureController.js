@@ -5,19 +5,16 @@ const User = require("../models/User");
 // ── Get All Lectures ──────────────────────────────────────────────
 exports.getLectures = async (req, res, next) => {
   try {
-    let query;
+    let lectures;
     if (req.user.role === "faculty") {
-      query = Lecture.find({ faculty: req.user._id, isActive: true })
+      lectures = await Lecture.find({ faculty: req.user._id, isActive: true })
         .populate("students", "name email rollNo")
         .sort({ createdAt: -1 });
     } else {
-      // Student sees only lectures they're enrolled in
-      query = Lecture.find({ students: req.user._id, isActive: true })
+      lectures = await Lecture.find({ students: req.user._id, isActive: true })
         .populate("faculty", "name email department")
         .sort({ createdAt: -1 });
     }
-
-    const lectures = await query;
     res.json({ success: true, count: lectures.length, lectures });
   } catch (err) {
     next(err);
@@ -61,7 +58,6 @@ exports.getLecture = async (req, res, next) => {
       return res.status(404).json({ success: false, message: "Lecture not found" });
     }
 
-    // Students can only see lectures they're enrolled in
     if (
       req.user.role === "student" &&
       !lecture.students.some((s) => s._id.toString() === req.user._id.toString())
@@ -93,7 +89,7 @@ exports.updateLecture = async (req, res, next) => {
   }
 };
 
-// ── Delete (Deactivate) Lecture ───────────────────────────────────
+// ── Delete Lecture ────────────────────────────────────────────────
 exports.deleteLecture = async (req, res, next) => {
   try {
     const lecture = await Lecture.findOneAndUpdate(
@@ -111,42 +107,74 @@ exports.deleteLecture = async (req, res, next) => {
 };
 
 // ── Add Student to Lecture ────────────────────────────────────────
+// Accepts: studentId (ObjectId) OR rollNo OR email
 exports.addStudent = async (req, res, next) => {
   try {
     const { studentId, rollNo, email } = req.body;
 
-    // Find student by any identifier
-    let student;
+    // Must provide at least one identifier
+    if (!studentId && !rollNo && !email) {
+      return res.status(400).json({
+        success: false,
+        message: "Provide studentId, rollNo, or email to find the student",
+      });
+    }
+
+    // Find the student by any identifier
+    let student = null;
+
     if (studentId) {
       student = await User.findOne({ _id: studentId, role: "student", isActive: true });
-    } else if (rollNo) {
-      student = await User.findOne({ rollNo, role: "student", isActive: true });
-    } else if (email) {
-      student = await User.findOne({ email, role: "student", isActive: true });
-    } else {
-      return res.status(400).json({ success: false, message: "Provide studentId, rollNo, or email" });
+    }
+
+    if (!student && rollNo) {
+      student = await User.findOne({
+        rollNo: rollNo.trim(),
+        role: "student",
+        isActive: true,
+      });
+    }
+
+    if (!student && email) {
+      student = await User.findOne({
+        email: email.toLowerCase().trim(),
+        role: "student",
+        isActive: true,
+      });
     }
 
     if (!student) {
       return res.status(404).json({
         success: false,
-        message: "Student not found. They must register first.",
+        message:
+          "Student not found. Make sure the student has registered an account on AttendEase with this Roll No / Email.",
       });
     }
 
-    const lecture = await Lecture.findOne({ _id: req.params.id, faculty: req.user._id });
+    // Check faculty owns this lecture
+    const lecture = await Lecture.findOne({
+      _id: req.params.id,
+      faculty: req.user._id,
+      isActive: true,
+    });
+
     if (!lecture) {
       return res.status(404).json({ success: false, message: "Lecture not found" });
     }
 
+    // Check already added
     if (lecture.students.some((id) => id.toString() === student._id.toString())) {
-      return res.status(409).json({ success: false, message: "Student is already in this lecture" });
+      return res.status(409).json({
+        success: false,
+        message: `${student.name} is already enrolled in this lecture`,
+      });
     }
 
+    // Add student
     lecture.students.push(student._id);
     await lecture.save();
 
-    // Auto-create ABSENT record for today
+    // Auto-create ABSENT record for today (default = absent)
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -160,8 +188,23 @@ exports.addStudent = async (req, res, next) => {
       { upsert: true, new: true }
     );
 
-    const updated = await Lecture.findById(lecture._id).populate("students", "name email rollNo");
-    res.json({ success: true, message: `${student.name} added to lecture`, lecture: updated });
+    // Return updated lecture with populated students
+    const updatedLecture = await Lecture.findById(lecture._id).populate(
+      "students",
+      "name email rollNo"
+    );
+
+    res.json({
+      success: true,
+      message: `${student.name} added successfully! Default attendance set to Absent.`,
+      student: {
+        _id: student._id,
+        name: student.name,
+        email: student.email,
+        rollNo: student.rollNo,
+      },
+      lecture: updatedLecture,
+    });
   } catch (err) {
     next(err);
   }
@@ -179,7 +222,7 @@ exports.removeStudent = async (req, res, next) => {
     if (!lecture) {
       return res.status(404).json({ success: false, message: "Lecture not found" });
     }
-    res.json({ success: true, message: "Student removed", lecture });
+    res.json({ success: true, message: "Student removed from lecture", lecture });
   } catch (err) {
     next(err);
   }

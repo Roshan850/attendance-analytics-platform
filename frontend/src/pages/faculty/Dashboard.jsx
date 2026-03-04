@@ -97,25 +97,4 @@ export default function FacultyDashboard() {
       </div>
     </div>
   );
-}const express = require("express");
-const router = express.Router();
-const {
-  markAttendance,
-  getLectureAttendance,
-  getStudentAttendance,
-  getAnalytics,
-  updateRecord,
-  removeRecord,
-} = require("../controllers/attendanceController");
-const { protect, facultyOnly } = require("../middleware/auth");
-
-router.use(protect);
-
-router.post("/mark", facultyOnly, markAttendance);
-router.get("/lecture/:lectureId", getLectureAttendance);
-router.get("/student/:studentId", getStudentAttendance);
-router.get("/analytics/:lectureId", facultyOnly, getAnalytics);
-router.put("/:id", updateRecord);
-router.delete("/:id", removeRecord);
-
-module.exports = router;
+}

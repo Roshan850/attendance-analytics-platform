@@ -1,185 +1,283 @@
-const Lecture = require("../models/Lecture");
+const mongoose = require("mongoose");
 const Attendance = require("../models/Attendance");
-const User = require("../models/User");
+const Lecture = require("../models/Lecture");
 
-// ── Get All Lectures ──────────────────────────────────────────────
-exports.getLectures = async (req, res, next) => {
-  try {
-    let query;
-    if (req.user.role === "faculty") {
-      query = Lecture.find({ faculty: req.user._id, isActive: true })
-        .populate("students", "name email rollNo")
-        .sort({ createdAt: -1 });
-    } else {
-      // Student sees only lectures they're enrolled in
-      query = Lecture.find({ students: req.user._id, isActive: true })
-        .populate("faculty", "name email department")
-        .sort({ createdAt: -1 });
-    }
-
-    const lectures = await query;
-    res.json({ success: true, count: lectures.length, lectures });
-  } catch (err) {
-    next(err);
-  }
+// ── Helper: normalize date to start-of-day UTC ────────────────────
+const normalizeDate = (dateStr) => {
+  const d = new Date(dateStr);
+  d.setUTCHours(0, 0, 0, 0);
+  return d;
 };
 
-// ── Create Lecture ────────────────────────────────────────────────
-exports.createLecture = async (req, res, next) => {
+// ── POST /api/attendance/mark ─────────────────────────────────────
+// Body: { lectureId, date, records: [{studentId, status}] }
+exports.markAttendance = async (req, res, next) => {
   try {
-    const { name, subject, subjectCode, schedule, semester, academicYear, room } = req.body;
+    const { lectureId, date, records } = req.body;
 
-    if (!name || !subject) {
-      return res.status(400).json({ success: false, message: "Name and subject are required" });
-    }
-
-    const lecture = await Lecture.create({
-      name,
-      subject,
-      subjectCode,
-      schedule,
-      semester,
-      academicYear,
-      room,
-      faculty: req.user._id,
-    });
-
-    res.status(201).json({ success: true, message: "Lecture created", lecture });
-  } catch (err) {
-    next(err);
-  }
-};
-
-// ── Get Single Lecture ────────────────────────────────────────────
-exports.getLecture = async (req, res, next) => {
-  try {
-    const lecture = await Lecture.findById(req.params.id)
-      .populate("faculty", "name email department")
-      .populate("students", "name email rollNo");
-
-    if (!lecture || !lecture.isActive) {
-      return res.status(404).json({ success: false, message: "Lecture not found" });
-    }
-
-    // Students can only see lectures they're enrolled in
-    if (
-      req.user.role === "student" &&
-      !lecture.students.some((s) => s._id.toString() === req.user._id.toString())
-    ) {
-      return res.status(403).json({ success: false, message: "Not enrolled in this lecture" });
-    }
-
-    res.json({ success: true, lecture });
-  } catch (err) {
-    next(err);
-  }
-};
-
-// ── Update Lecture ────────────────────────────────────────────────
-exports.updateLecture = async (req, res, next) => {
-  try {
-    const lecture = await Lecture.findOneAndUpdate(
-      { _id: req.params.id, faculty: req.user._id },
-      req.body,
-      { new: true, runValidators: true }
-    ).populate("students", "name email rollNo");
-
-    if (!lecture) {
-      return res.status(404).json({ success: false, message: "Lecture not found" });
-    }
-    res.json({ success: true, message: "Lecture updated", lecture });
-  } catch (err) {
-    next(err);
-  }
-};
-
-// ── Delete (Deactivate) Lecture ───────────────────────────────────
-exports.deleteLecture = async (req, res, next) => {
-  try {
-    const lecture = await Lecture.findOneAndUpdate(
-      { _id: req.params.id, faculty: req.user._id },
-      { isActive: false },
-      { new: true }
-    );
-    if (!lecture) {
-      return res.status(404).json({ success: false, message: "Lecture not found" });
-    }
-    res.json({ success: true, message: "Lecture removed" });
-  } catch (err) {
-    next(err);
-  }
-};
-
-// ── Add Student to Lecture ────────────────────────────────────────
-exports.addStudent = async (req, res, next) => {
-  try {
-    const { studentId, rollNo, email } = req.body;
-
-    // Find student by any identifier
-    let student;
-    if (studentId) {
-      student = await User.findOne({ _id: studentId, role: "student", isActive: true });
-    } else if (rollNo) {
-      student = await User.findOne({ rollNo, role: "student", isActive: true });
-    } else if (email) {
-      student = await User.findOne({ email, role: "student", isActive: true });
-    } else {
-      return res.status(400).json({ success: false, message: "Provide studentId, rollNo, or email" });
-    }
-
-    if (!student) {
-      return res.status(404).json({
+    if (!lectureId || !date || !Array.isArray(records) || records.length === 0) {
+      return res.status(400).json({
         success: false,
-        message: "Student not found. They must register first.",
+        message: "lectureId, date, and records[] are required",
       });
     }
 
-    const lecture = await Lecture.findOne({ _id: req.params.id, faculty: req.user._id });
+    const lecture = await Lecture.findOne({ _id: lectureId, faculty: req.user._id });
     if (!lecture) {
       return res.status(404).json({ success: false, message: "Lecture not found" });
     }
 
-    if (lecture.students.some((id) => id.toString() === student._id.toString())) {
-      return res.status(409).json({ success: false, message: "Student is already in this lecture" });
-    }
+    const targetDate = normalizeDate(date);
 
-    lecture.students.push(student._id);
-    await lecture.save();
-
-    // Auto-create ABSENT record for today
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    await Attendance.findOneAndUpdate(
-      { lecture: lecture._id, student: student._id, date: today },
-      {
-        faculty: req.user._id,
-        status: "absent",
-        markedAt: new Date(),
-      },
-      { upsert: true, new: true }
+    const ops = records.map(({ studentId, status }) =>
+      Attendance.findOneAndUpdate(
+        { lecture: lectureId, student: studentId, date: targetDate },
+        { faculty: req.user._id, status: status || "absent", markedAt: new Date() },
+        { upsert: true, new: true }
+      )
     );
 
-    const updated = await Lecture.findById(lecture._id).populate("students", "name email rollNo");
-    res.json({ success: true, message: `${student.name} added to lecture`, lecture: updated });
+    const results = await Promise.all(ops);
+    res.json({
+      success: true,
+      message: `Attendance saved for ${results.length} student(s)`,
+      count: results.length,
+    });
   } catch (err) {
     next(err);
   }
 };
 
-// ── Remove Student from Lecture ───────────────────────────────────
-exports.removeStudent = async (req, res, next) => {
+// ── PUT /api/attendance/:id ───────────────────────────────────────
+exports.updateRecord = async (req, res, next) => {
   try {
-    const lecture = await Lecture.findOneAndUpdate(
+    const record = await Attendance.findOneAndUpdate(
       { _id: req.params.id, faculty: req.user._id },
-      { $pull: { students: req.params.studentId } },
-      { new: true }
-    ).populate("students", "name email rollNo");
+      { status: req.body.status, markedAt: new Date() },
+      { new: true, runValidators: true }
+    ).populate("student", "name rollNo email");
 
+    if (!record) {
+      return res.status(404).json({ success: false, message: "Record not found" });
+    }
+    res.json({ success: true, message: "Attendance updated", record });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ── GET /api/attendance/lecture/:lectureId ────────────────────────
+exports.getLectureAttendance = async (req, res, next) => {
+  try {
+    const { date, month, year } = req.query;
+    const { lectureId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(lectureId)) {
+      return res.status(400).json({ success: false, message: "Invalid lecture ID" });
+    }
+
+    const filter = { lecture: lectureId };
+
+    if (date) {
+      const d = normalizeDate(date);
+      const nextDay = new Date(d);
+      nextDay.setDate(nextDay.getDate() + 1);
+      filter.date = { $gte: d, $lt: nextDay };
+    } else if (month && year) {
+      filter.date = {
+        $gte: new Date(year, month - 1, 1),
+        $lt: new Date(year, month, 1),
+      };
+    } else if (year) {
+      filter.date = {
+        $gte: new Date(year, 0, 1),
+        $lt: new Date(parseInt(year) + 1, 0, 1),
+      };
+    }
+
+    const records = await Attendance.find(filter)
+      .populate("student", "name email rollNo")
+      .sort({ date: -1 });
+
+    res.json({ success: true, count: records.length, records });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ── GET /api/attendance/student/:studentId ────────────────────────
+exports.getStudentAttendance = async (req, res, next) => {
+  try {
+    const { studentId } = req.params;
+
+    if (req.user.role === "student" && req.user._id.toString() !== studentId) {
+      return res.status(403).json({ success: false, message: "Access denied" });
+    }
+
+    const { lectureId, month, year, page = 1, limit = 50 } = req.query;
+    const filter = { student: studentId };
+
+    if (lectureId) filter.lecture = lectureId;
+
+    if (month && year) {
+      filter.date = {
+        $gte: new Date(year, month - 1, 1),
+        $lt: new Date(year, month, 1),
+      };
+    } else if (year) {
+      filter.date = {
+        $gte: new Date(year, 0, 1),
+        $lt: new Date(parseInt(year) + 1, 0, 1),
+      };
+    }
+
+    const skip = (page - 1) * limit;
+
+    const [records, total] = await Promise.all([
+      Attendance.find(filter)
+        .populate("lecture", "name subject subjectCode")
+        .sort({ date: -1 })
+        .skip(skip)
+        .limit(parseInt(limit)),
+      Attendance.countDocuments(filter),
+    ]);
+
+    // Per-lecture stats
+    const allRecords = await Attendance.find({
+      student: studentId,
+      ...(lectureId && { lecture: lectureId }),
+    }).populate("lecture", "name subject");
+
+    const statsMap = {};
+    allRecords.forEach((r) => {
+      const lid = r.lecture?._id?.toString();
+      if (!lid) return;
+      if (!statsMap[lid]) {
+        statsMap[lid] = {
+          lectureId: lid,
+          lectureName: r.lecture?.name,
+          subject: r.lecture?.subject,
+          total: 0,
+          present: 0,
+          absent: 0,
+        };
+      }
+      statsMap[lid].total++;
+      statsMap[lid][r.status]++;
+    });
+
+    const lectureStats = Object.values(statsMap).map((s) => ({
+      ...s,
+      percentage: s.total ? Math.round((s.present / s.total) * 100) : 0,
+    }));
+
+    res.json({
+      success: true,
+      count: records.length,
+      total,
+      page: parseInt(page),
+      pages: Math.ceil(total / limit),
+      records,
+      lectureStats,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ── GET /api/attendance/analytics/lecture/:lectureId ──────────────
+exports.getLectureAnalytics = async (req, res, next) => {
+  try {
+    const { lectureId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(lectureId)) {
+      return res.status(400).json({ success: false, message: "Invalid lecture ID" });
+    }
+
+    const lecture = await Lecture.findOne({ _id: lectureId, faculty: req.user._id });
     if (!lecture) {
       return res.status(404).json({ success: false, message: "Lecture not found" });
     }
-    res.json({ success: true, message: "Student removed", lecture });
+
+    const records = await Attendance.find({ lecture: lectureId }).populate(
+      "student",
+      "name rollNo email"
+    );
+
+    // Per-student stats
+    const studentMap = {};
+    records.forEach((r) => {
+      const sid = r.student?._id?.toString();
+      if (!sid) return;
+      if (!studentMap[sid]) {
+        studentMap[sid] = { student: r.student, total: 0, present: 0, absent: 0 };
+      }
+      studentMap[sid].total++;
+      studentMap[sid][r.status]++;
+    });
+
+    const studentStats = Object.values(studentMap)
+      .map((s) => ({
+        ...s,
+        percentage: s.total ? Math.round((s.present / s.total) * 100) : 0,
+      }))
+      .sort((a, b) => a.percentage - b.percentage);
+
+    // Daily trend (last 30 days)
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    thirtyDaysAgo.setHours(0, 0, 0, 0);
+
+    const recentRecords = records.filter((r) => new Date(r.date) >= thirtyDaysAgo);
+    const dailyMap = {};
+    recentRecords.forEach((r) => {
+      const day = r.date.toISOString().split("T")[0];
+      if (!dailyMap[day]) dailyMap[day] = { date: day, present: 0, absent: 0, total: 0 };
+      dailyMap[day][r.status]++;
+      dailyMap[day].total++;
+    });
+
+    const dailyTrend = Object.values(dailyMap)
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .map((d) => ({
+        ...d,
+        percentage: d.total ? Math.round((d.present / d.total) * 100) : 0,
+      }));
+
+    // Monthly summary
+    const monthlyMap = {};
+    records.forEach((r) => {
+      const key = `${r.date.getFullYear()}-${String(r.date.getMonth() + 1).padStart(2, "0")}`;
+      if (!monthlyMap[key]) monthlyMap[key] = { month: key, present: 0, absent: 0, total: 0 };
+      monthlyMap[key][r.status]++;
+      monthlyMap[key].total++;
+    });
+    const monthlyStats = Object.values(monthlyMap).sort((a, b) =>
+      a.month.localeCompare(b.month)
+    );
+
+    const overallPresent = records.filter((r) => r.status === "present").length;
+    const overallTotal = records.length;
+
+    res.json({
+      success: true,
+      lecture: {
+        name: lecture.name,
+        subject: lecture.subject,
+        studentCount: lecture.students.length,
+      },
+      overall: {
+        total: overallTotal,
+        present: overallPresent,
+        absent: overallTotal - overallPresent,
+        percentage: overallTotal
+          ? Math.round((overallPresent / overallTotal) * 100)
+          : 0,
+      },
+      studentStats,
+      dailyTrend,
+      monthlyStats,
+    });
   } catch (err) {
     next(err);
   }

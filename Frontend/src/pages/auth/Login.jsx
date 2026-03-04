@@ -1,59 +1,86 @@
-// ── Date Helpers ──────────────────────────────────────────────────
-export const formatDate = (date, options = {}) => {
-  return new Date(date).toLocaleDateString("en-IN", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    ...options,
-  });
-};
+import { useState } from "react";
+import { Link, useNavigate, Navigate } from "react-router-dom";
+import { useAuth } from "../../context/AuthContext";
+import { authAPI } from "../../utils/api";
+import { getErrorMsg } from "../../utils/helpers";
+import toast from "react-hot-toast";
 
-export const formatDateTime = (date) =>
-  new Date(date).toLocaleString("en-IN", {
-    day: "numeric", month: "short", year: "numeric",
-    hour: "2-digit", minute: "2-digit",
-  });
+export default function Login() {
+  const { user, login } = useAuth();
+  const navigate = useNavigate();
+  const [form, setForm] = useState({ email: "", password: "" });
+  const [loading, setLoading] = useState(false);
+  const [showPass, setShowPass] = useState(false);
 
-export const todayString = () => new Date().toISOString().split("T")[0];
+  if (user) return <Navigate to={`/${user.role}/dashboard`} replace />;
 
-export const getMonthName = (monthNum) => {
-  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-  return months[parseInt(monthNum) - 1] || monthNum;
-};
+  const handleChange = (e) => setForm((p) => ({ ...p, [e.target.name]: e.target.value }));
 
-// ── Attendance Helpers ────────────────────────────────────────────
-export const calcPercentage = (present, total) =>
-  total ? Math.round((present / total) * 100) : 0;
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!form.email || !form.password) return toast.error("Fill all fields");
+    setLoading(true);
+    try {
+      const res = await authAPI.login(form);
+      login(res.data.user, res.data.token);
+      toast.success(res.data.message);
+      navigate(`/${res.data.user.role}/dashboard`, { replace: true });
+    } catch (err) {
+      toast.error(getErrorMsg(err));
+    } finally {
+      setLoading(false);
+    }
+  };
 
-export const getAttendanceColor = (percentage) => {
-  if (percentage >= 75) return "var(--success)";
-  if (percentage >= 50) return "var(--warning)";
-  return "var(--danger)";
-};
+  return (
+    <div className="hero-section">
+      <div className="auth-box">
+        <div className="text-center mb-4">
+          <div style={{ fontSize: "2.5rem" }}>🎓</div>
+          <h4 className="fw-bold mt-2 mb-1" style={{ color: "#4f46e5" }}>Welcome Back</h4>
+          <p className="text-muted small">Login to your AttendEase account</p>
+        </div>
 
-export const getAttendanceBadge = (percentage) => {
-  if (percentage >= 75) return { label: "Good", class: "badge-present" };
-  if (percentage >= 50) return { label: "Average", class: "badge-warn" };
-  return { label: "Low ⚠️", class: "badge-absent" };
-};
+        <form onSubmit={handleSubmit} noValidate>
+          <div className="mb-3">
+            <label className="form-label fw-semibold small">Email Address</label>
+            <input
+              type="email" name="email" className="form-control form-control-lg"
+              placeholder="your@email.com" value={form.email} onChange={handleChange}
+              disabled={loading} required autoFocus
+            />
+          </div>
 
-// ── Error Message Extractor ───────────────────────────────────────
-export const getErrorMsg = (err) => {
-  if (err?.response?.data?.message) return err.response.data.message;
-  if (err?.response?.data?.errors?.[0]?.message) return err.response.data.errors[0].message;
-  if (err?.message) return err.message;
-  return "Something went wrong. Please try again.";
-};
+          <div className="mb-4">
+            <label className="form-label fw-semibold small">Password</label>
+            <div className="input-group">
+              <input
+                type={showPass ? "text" : "password"} name="password"
+                className="form-control form-control-lg" placeholder="Your password"
+                value={form.password} onChange={handleChange} disabled={loading} required
+              />
+              <button type="button" className="btn btn-outline-secondary"
+                onClick={() => setShowPass((p) => !p)}>
+                {showPass ? "🙈" : "👁️"}
+              </button>
+            </div>
+          </div>
 
-// ── String Helpers ────────────────────────────────────────────────
-export const capitalize = (str) =>
-  str ? str.charAt(0).toUpperCase() + str.slice(1) : "";
+          <button type="submit" className="btn btn-lg w-100 fw-bold" disabled={loading}
+            style={{ background: "#4f46e5", color: "white", borderRadius: 8 }}>
+            {loading ? (
+              <><span className="spinner-border spinner-border-sm me-2" />Logging in...</>
+            ) : "Login →"}
+          </button>
+        </form>
 
-export const getInitials = (name) =>
-  name ? name.split(" ").map((n) => n[0]).join("").substring(0, 2).toUpperCase() : "??";
-
-// ── Year options ──────────────────────────────────────────────────
-export const getYearOptions = () => {
-  const current = new Date().getFullYear();
-  return [current - 1, current, current + 1];
-};
+        <div className="text-center mt-4">
+          <p className="text-muted small mb-2">
+            Don't have an account? <Link to="/register" style={{ color: "#4f46e5", fontWeight: 600 }}>Register here</Link>
+          </p>
+          <Link to="/" className="text-muted small">← Back to Home</Link>
+        </div>
+      </div>
+    </div>
+  );
+}
