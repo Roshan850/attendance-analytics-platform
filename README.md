@@ -367,23 +367,6 @@ This project is deployed using **free-tier** services:
   "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
 }
 ```
-
----
-
-## 📸 Screenshots
-
-<div align="center">
-
-| Faculty Dashboard | Mark Attendance |
-|:-----------------:|:---------------:|
-| ![Faculty Dashboard](https://placehold.co/420x260/1e1b4b/818cf8?text=Faculty+Dashboard&font=montserrat) | ![Mark Attendance](https://placehold.co/420x260/052e16/34d399?text=Mark+Attendance&font=montserrat) |
-
-| Analytics | Student View |
-|:---------:|:------------:|
-| ![Analytics](https://placehold.co/420x260/0c4a6e/06b6d4?text=Analytics+%26+Charts&font=montserrat) | ![Student](https://placehold.co/420x260/312e81/a5b4fc?text=Student+Portal&font=montserrat) |
-
-</div>
-
 ---
 
 ## 🗄️ Database Schema
