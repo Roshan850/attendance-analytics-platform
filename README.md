@@ -44,7 +44,6 @@
 - [Environment Variables](#-environment-variables)
 - [API Reference](#-api-reference)
 - [Deployment](#-deployment)
-- [Screenshots](#-screenshots)
 - [Contributing](#-contributing)
 - [License](#-license)
 
